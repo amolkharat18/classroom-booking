@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.sqlite3
+*.db
+.streamlit/secrets.toml
+streamlit*.log
+
+.agents/
+.codex/
