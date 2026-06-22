@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+import html
 
 import pandas as pd
 import plotly.express as px
@@ -29,7 +30,270 @@ def get_conn():
     return conn
 
 
+def render_global_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        html:not([data-theme="dark"]),
+        html:not([data-theme="dark"]) body,
+        html:not([data-theme="dark"]) [class*="css"] {
+            font-family: 'Inter', sans-serif !important;
+            color: #0f172a;
+        }
+
+        html[data-theme="dark"],
+        html[data-theme="dark"] body,
+        html[data-theme="dark"] [class*="css"],
+        body[data-theme="dark"],
+        body[data-theme="dark"] [class*="css"] {
+            font-family: 'Inter', sans-serif !important;
+            color: #e2e8f0 !important;
+        }
+
+        div[data-testid="stAppViewContainer"] {
+            background: #f8fafc;
+        }
+
+        html[data-theme="dark"] div[data-testid="stAppViewContainer"],
+        body[data-theme="dark"] div[data-testid="stAppViewContainer"] {
+            background: #020617;
+        }
+
+        div[data-testid="stSidebar"] {
+            background: #ffffff;
+            box-shadow: 0 24px 80px rgba(15, 23, 42, 0.08);
+            border-right: 1px solid rgba(15, 23, 42, 0.08);
+            padding-top: 1.2rem;
+        }
+
+        html[data-theme="dark"] div[data-testid="stSidebar"],
+        body[data-theme="dark"] div[data-testid="stSidebar"] {
+            background: #020617;
+            border-right: 1px solid rgba(148, 163, 184, 0.24);
+            color: #e2e8f0;
+        }
+
+        html[data-theme="dark"] .stSidebar > div,
+        body[data-theme="dark"] .stSidebar > div,
+        html[class*="theme-dark"] .stSidebar > div,
+        body[class*="theme-dark"] .stSidebar > div,
+        html.dark .stSidebar > div,
+        body.dark .stSidebar > div,
+        :where(html, body)[data-theme="dark"] .stSidebar > div {
+            background: transparent !important;
+        }
+
+        section.main .block-container {
+            max-width: 1380px;
+            padding-top: 1.4rem;
+            padding-bottom: 2rem;
+            padding-left: 2rem;
+            padding-right: 2rem;
+        }
+
+        html[data-theme="dark"] .block-container,
+        body[data-theme="dark"] .block-container,
+        html[class*="theme-dark"] .block-container,
+        body[class*="theme-dark"] .block-container,
+        html.dark .block-container,
+        body.dark .block-container,
+        :where(html, body)[data-theme="dark"] .block-container {
+            background: #020617 !important;
+        }
+
+        html[data-theme="dark"] .stForm,
+        body[data-theme="dark"] .stForm,
+        :where(html, body)[data-theme="dark"] .stForm,
+        html[data-theme="dark"] .stExpander,
+        body[data-theme="dark"] .stExpander,
+        :where(html, body)[data-theme="dark"] .stExpander {
+            background: #0f172a !important;
+            color: #e2e8f0 !important;
+        }
+
+        div[data-testid="stSidebar"] {
+            background: #ffffff;
+            box-shadow: 0 24px 80px rgba(15, 23, 42, 0.08);
+            border-right: 1px solid rgba(15, 23, 42, 0.08);
+            padding-top: 1.2rem;
+        }
+
+        button[data-baseweb="button"] {
+            border-radius: 999px !important;
+            padding: 0.85rem 1.25rem !important;
+            font-weight: 600 !important;
+            min-height: 3rem;
+            transition: all 0.2s ease;
+            color: #ffffff !important;
+            background: #2563eb !important;
+        }
+
+        button[data-baseweb="button"]:not(:disabled):hover {
+            filter: brightness(0.94);
+        }
+
+        html[data-theme="dark"] button[data-baseweb="button"] {
+            color: #ffffff !important;
+            background: #2563eb !important;
+        }
+
+        .stTextInput>div>div>input,
+        .stNumberInput>div>div>input,
+        .stSelectbox>div>div>div,
+        .stDateInput>div>div>input,
+        .stTimeInput>div>div>input,
+        .stTextArea>div>textarea {
+            border-radius: 0.85rem !important;
+        }
+
+        .section-card {
+            background: #ffffff;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 1.25rem;
+            padding: 1.25rem 1.4rem;
+            margin-bottom: 1.4rem;
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.04);
+        }
+
+        .sample-prompt-card {
+            background: #f8fafc;
+            border-radius: 1rem;
+            padding: 0.95rem 1rem;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            overflow-wrap: anywhere;
+        }
+
+        html[data-theme="dark"] .sample-prompt-card,
+        body[data-theme="dark"] .sample-prompt-card,
+        html[class*="theme-dark"] .sample-prompt-card,
+        body[class*="theme-dark"] .sample-prompt-card,
+        html.dark .sample-prompt-card,
+        body.dark .sample-prompt-card,
+        :where(html, body)[data-theme="dark"] .sample-prompt-card {
+            background: rgba(255, 255, 255, 0.04) !important;
+            border: 1px solid rgba(148, 163, 184, 0.18) !important;
+        }
+
+        html[data-theme="dark"] .sample-prompt-card code,
+        body[data-theme="dark"] .sample-prompt-card code,
+        :where(html, body)[data-theme="dark"] .sample-prompt-card code {
+            color: #e2e8f0 !important;
+            background: transparent !important;
+            font-size: 0.95rem;
+        }
+
+        html[data-theme="dark"] .sample-prompt-card {
+            color: #e2e8f0 !important;
+        }
+
+        html[data-theme="dark"] .section-card,
+        body[data-theme="dark"] .section-card,
+        html[class*="theme-dark"] .section-card,
+        body[class*="theme-dark"] .section-card,
+        html.dark .section-card,
+        body.dark .section-card,
+        :where(html, body)[data-theme="dark"] .section-card {
+            background: #080b14 !important;
+            border: 1px solid rgba(148, 163, 184, 0.16) !important;
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.32) !important;
+        }
+
+        html[data-theme="dark"] .section-card *,
+        body[data-theme="dark"] .section-card *,
+        :where(html, body)[data-theme="dark"] .section-card * {
+            color: #e2e8f0 !important;
+        }
+
+        .section-card-title {
+            font-size: 1.35rem;
+            font-weight: 700;
+            margin-bottom: 0.3rem;
+            color: #0f172a;
+        }
+
+        html[data-theme="dark"] .section-card-title,
+        body[data-theme="dark"] .section-card-title,
+        :where(html, body)[data-theme="dark"] .section-card-title {
+            color: #ffffff !important;
+        }
+
+        .section-card-subtitle {
+            color: #475569;
+            margin-top: 0.15rem;
+            line-height: 1.6;
+        }
+
+        html[data-theme="dark"] .section-card-subtitle,
+        body[data-theme="dark"] .section-card-subtitle,
+        :where(html, body)[data-theme="dark"] .section-card-subtitle {
+            color: #cbd5e1 !important;
+        }
+
+        :where(html, body)[data-theme="dark"] .block-container,
+        :where(html, body)[data-theme="dark"] .block-container *,
+        :where(html, body)[data-theme="dark"] .stMarkdown,
+        :where(html, body)[data-theme="dark"] .stMarkdown *,
+        :where(html, body)[data-theme="dark"] .stText,
+        :where(html, body)[data-theme="dark"] .stText *,
+        :where(html, body)[data-theme="dark"] h1,
+        :where(html, body)[data-theme="dark"] h2,
+        :where(html, body)[data-theme="dark"] h3,
+        :where(html, body)[data-theme="dark"] h4,
+        :where(html, body)[data-theme="dark"] h5,
+        :where(html, body)[data-theme="dark"] h6,
+        :where(html, body)[data-theme="dark"] p,
+        :where(html, body)[data-theme="dark"] span,
+        :where(html, body)[data-theme="dark"] strong,
+        :where(html, body)[data-theme="dark"] label,
+        :where(html, body)[data-theme="dark"] button,
+        :where(html, body)[data-theme="dark"] input,
+        :where(html, body)[data-theme="dark"] textarea,
+        :where(html, body)[data-theme="dark"] select {
+            color: #e2e8f0 !important;
+        }
+
+        :where(html, body)[data-theme="dark"] .stTextInput>div>div>input,
+        :where(html, body)[data-theme="dark"] .stNumberInput>div>div>input,
+        :where(html, body)[data-theme="dark"] .stDateInput>div>div>input,
+        :where(html, body)[data-theme="dark"] .stTimeInput>div>div>input,
+        :where(html, body)[data-theme="dark"] .stSelectbox>div>div>div {
+            background: #111827 !important;
+            color: #e2e8f0 !important;
+            border-color: rgba(148, 163, 184, 0.3) !important;
+        }
+
+        html[data-theme="dark"] *,
+        body[data-theme="dark"] *,
+        :where(html, body)[data-theme="dark"] * {
+            color: #e2e8f0 !important;
+        }
+
+        .stTabs [role="tablist"] button {
+            border-radius: 999px !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def section_card(title: str, subtitle: str = "") -> None:
+    subtitle_html = f"<div class='section-card-subtitle'>{subtitle}</div>" if subtitle else ""
+    st.markdown(
+        f"""
+        <div class="section-card">
+            <div class="section-card-title">{title}</div>
+            {subtitle_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def main() -> None:
+    render_global_styles()
     conn = get_conn()
     st.title(APP_NAME)
     st.caption("SQLite classroom booking with chat, calendar management, holidays, recurrence, and analytics.")
@@ -44,9 +308,14 @@ def main() -> None:
         return
 
     with st.sidebar:
-        st.markdown(f"Signed in as **{user['username']}**")
+        st.markdown("### Workspace")
+        st.markdown("Manage bookings, rooms, and analytics from a polished dashboard.")
         st.caption("Admin" if user["is_admin"] else "User")
-        if st.button("Sign out", use_container_width=True):
+        st.divider()
+        st.markdown("**Signed in as**")
+        st.markdown(f"<strong>{user['username']}</strong>", unsafe_allow_html=True)
+        st.write("")
+        if st.button("Sign out", width="stretch"):
             st.session_state.clear()
             st.rerun()
 
@@ -63,11 +332,12 @@ def main() -> None:
 
 
 def first_admin_form(conn) -> None:
-    st.info("Create the first administrator account.")
+    section_card("Create administrator account", "Set up the first admin user for the classroom booking portal.")
     with st.form("first_admin"):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Create admin")
+        st.write("")
+        submitted = st.form_submit_button("Create admin", type="primary")
     if submitted:
         try:
             user_id = auth.create_user(conn, username, password, is_admin=True)
@@ -79,10 +349,12 @@ def first_admin_form(conn) -> None:
 
 
 def login_form(conn) -> None:
+    section_card("Sign in", "Access your classroom booking dashboard securely.")
     with st.form("login"):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Sign in")
+        st.write("")
+        submitted = st.form_submit_button("Sign in", type="primary")
     if submitted:
         user = auth.authenticate(conn, username, password)
         if user:
@@ -93,7 +365,8 @@ def login_form(conn) -> None:
 
 def render_chat(conn, user: dict, tab) -> None:
     with tab:
-        st.subheader("Booking Assistant")
+        section_card("Booking Assistant", "Ask the assistant to check availability, book rooms, or manage your bookings with natural language.")
+        st.subheader("Chat with the booking assistant")
         api_key = agent.openai_api_key_from_streamlit(st)
         if not api_key:
             st.warning("OPENAI_API_KEY is not configured. The UI still works, but chat is disabled.")
@@ -168,19 +441,26 @@ def render_sample_prompts() -> None:
         st.info("Find booking IDs in the My Bookings tab — use these IDs to modify or cancel bookings.")
         for heading, prompts in examples.items():
             st.markdown(f"**{heading}**")
+            st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
             for i, p in enumerate(prompts):
-                cols = st.columns([0.85, 0.15])
-                cols[0].code(p, language="text")
-                if cols[1].button("Copy", key=f"copy_{heading}_{i}"):
-                    st.session_state["chat_input"] = p
-                    try:
-                        st.experimental_rerun()
-                    except Exception:
-                        st.success("Prompt copied to chat input. Click the chat box to edit and submit.")
+                cols = st.columns([0.84, 0.16], gap="small")
+                cols[0].markdown(
+                    f"<div class='sample-prompt-card'><code>{html.escape(p)}</code></div>",
+                    unsafe_allow_html=True,
+                )
+                with cols[1]:
+                    if st.button("Copy", key=f"copy_{heading}_{i}"):
+                        st.session_state["chat_input"] = p
+                        try:
+                            st.experimental_rerun()
+                        except Exception:
+                            st.success("Prompt copied to chat input. Click the chat box to edit and submit.")
+                st.markdown("<div style='height:0.55rem'></div>", unsafe_allow_html=True)
 
 
 def render_calendar(conn, user: dict, tab) -> None:
     with tab:
+        section_card("Booking Calendar", "View upcoming bookings, holidays, and book quickly using the calendar controls.")
         st.subheader("Booking Calendar")
         col1, col2, col3 = st.columns(3)
         today = date.today()
@@ -229,7 +509,7 @@ def render_calendar(conn, user: dict, tab) -> None:
             calendar(events=events, options=options, key=f"calendar_{view}_{start}_{end}")
         else:
             st.warning("Install streamlit-calendar for interactive calendar views.")
-            st.dataframe(pd.DataFrame(events), use_container_width=True)
+            st.dataframe(pd.DataFrame(events), width="stretch")
         st.caption("Date-specific holidays are shown in red. Weekly closed days are hidden and cannot be booked.")
 
         st.divider()
@@ -317,6 +597,7 @@ def quick_booking_form(conn, user: dict) -> None:
 
 def render_my_bookings(conn, user: dict, tab) -> None:
     with tab:
+        section_card("My Bookings", "Review and manage your active bookings with clear edit and delete controls.")
         st.subheader("My Bookings" if not user["is_admin"] else "Bookings")
         rows = service.list_bookings(conn, user_id=None if user["is_admin"] else user["id"])
         if not rows:
@@ -387,6 +668,7 @@ def render_my_bookings(conn, user: dict, tab) -> None:
 
 def render_heatmap(conn, tab) -> None:
     with tab:
+        section_card("Room Availability Heatmap", "Analyze room utilization and booking patterns across your selected date range.")
         st.subheader("Room Availability Heatmap")
         c1, c2 = st.columns(2)
         start = c1.date_input("Analytics from", date.today().replace(day=1), key="heat_from")
@@ -402,15 +684,16 @@ def render_heatmap(conn, tab) -> None:
                 color_continuous_scale="Blues",
                 labels={"color": "Booked hours"},
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         util = analytics.utilization_dataframe(conn, start, end)
         if not util.empty:
             st.markdown("#### Utilization")
-            st.dataframe(util, use_container_width=True, hide_index=True)
+            st.dataframe(util, width="stretch", hide_index=True)
 
 
 def render_admin(conn, user: dict, tab) -> None:
     with tab:
+        section_card("Admin Dashboard", "Manage rooms, users, reports, holidays, and audit logs from one place.")
         st.subheader("Admin")
         room_tab, user_tab, report_tab, holiday_tab, audit_tab = st.tabs(["Rooms", "Users", "Reports", "Holidays", "Audit"])
         with room_tab:
@@ -423,7 +706,7 @@ def render_admin(conn, user: dict, tab) -> None:
             admin_holidays(conn, user)
         with audit_tab:
             rows = conn.execute("SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 200").fetchall()
-            st.dataframe(pd.DataFrame([dict(row) for row in rows]), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame([dict(row) for row in rows]), width="stretch", hide_index=True)
 
 
 def admin_rooms(conn, user: dict) -> None:
@@ -535,14 +818,14 @@ def admin_reports(conn) -> None:
     if user_summary.empty:
         st.info("No bookings found in this period.")
     else:
-        st.dataframe(user_summary, use_container_width=True)
+        st.dataframe(user_summary, width="stretch")
 
     st.markdown("##### Room utilization and booking volumes")
-    st.dataframe(room_summary, use_container_width=True)
+    st.dataframe(room_summary, width="stretch")
 
     st.markdown("##### Bookings by weekday")
     if not weekday_summary.empty:
-        st.dataframe(weekday_summary, use_container_width=True)
+        st.dataframe(weekday_summary, width="stretch")
 
 
 def admin_holidays(conn, user: dict) -> None:
