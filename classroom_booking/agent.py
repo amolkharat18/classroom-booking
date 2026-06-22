@@ -43,8 +43,39 @@ def tools_schema() -> list[dict[str, Any]]:
                         "start": {"type": "string", "description": "YYYY-MM-DD HH:MM"},
                         "end": {"type": "string", "description": "YYYY-MM-DD HH:MM"},
                         "room_name": {"type": "string"},
+                        "min_capacity": {"type": "integer", "description": "Minimum number of participants"},
                     },
                     "required": ["start", "end"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "suggest_rooms",
+                "description": "Suggest available classrooms for a time window and minimum capacity.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "start": {"type": "string", "description": "YYYY-MM-DD HH:MM"},
+                        "end": {"type": "string", "description": "YYYY-MM-DD HH:MM"},
+                        "min_capacity": {"type": "integer", "description": "Minimum number of participants"},
+                    },
+                    "required": ["start", "end"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_room_info",
+                "description": "Retrieve the capacity and details for a named room.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "room_name": {"type": "string"},
+                    },
+                    "required": ["room_name"],
                 },
             },
         },
@@ -122,6 +153,7 @@ def tools_schema() -> list[dict[str, Any]]:
 SYSTEM_PROMPT = """You are a classroom booking assistant.
 Use tools for availability, booking, listing, updating, and deleting.
 Collect missing dates, times, room names, and titles before booking.
+You may also answer questions about room capacity, capacity limits, and suggest rooms based on participant count.
 Use 24-hour local time. Today is supplied by the app context.
 Destructive updates and deletes are confirmation-gated by the app."""
 
@@ -186,7 +218,26 @@ def chat(
 def execute_tool(conn: sqlite3.Connection, user: dict, name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name == "check_availability":
         room_id = _room_id_from_name(conn, args.get("room_name")) if args.get("room_name") else None
-        return {"availability": service.check_availability(conn, args["start"], args["end"], room_id)}
+        return {
+            "availability": service.check_availability(
+                conn,
+                args["start"],
+                args["end"],
+                room_id,
+                int(args.get("min_capacity") or 0),
+            )
+        }
+    if name == "suggest_rooms":
+        return {
+            "suggested_rooms": service.suggest_rooms(
+                conn,
+                args["start"],
+                args["end"],
+                int(args.get("min_capacity") or 0),
+            )
+        }
+    if name == "get_room_info":
+        return service.get_room_info(conn, args["room_name"])
     if name == "create_booking":
         room_id = _room_id_from_name(conn, args["room_name"])
         recurrence = None

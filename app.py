@@ -107,7 +107,9 @@ def render_chat(conn, user: dict, tab) -> None:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
-        prompt = st.chat_input("Example: Book Room A tomorrow 10:00 to 11:00 for Physics")
+        if "chat_input" not in st.session_state:
+            st.session_state["chat_input"] = ""
+        prompt = st.chat_input("Example: Book Room-101 tomorrow 10 AM to 11 AM for Physics", key="chat_input")
         if prompt:
             st.session_state.chat_messages.append({"role": "user", "content": prompt})
             if st.session_state.get("pending_tool") and prompt.strip().lower() in {"confirm", "yes", "proceed"}:
@@ -132,19 +134,28 @@ def render_chat(conn, user: dict, tab) -> None:
 def render_sample_prompts() -> None:
     examples = {
         "Check availability": [
-            "Which classrooms are available on 15-Jul-2026 from 10:00 to 12:00?",
-            "Is Room A free on 16-Jul-2026 from 14:00 to 15:30?",
+            "Which classrooms are available on 15-Jul-2026 from 10 AM to 12 PM?",
+            "Is Room-101 free on 16-Jul-2026 from 2 PM to 3:30 PM?",
         ],
         "Single booking": [
-            "Book Room A on 15-Jul-2026 from 10:00 to 11:00 for Physics lecture.",
-            "Reserve any available classroom on 17-Jul-2026 from 09:00 to 10:30 for project discussion.",
+            "Book Room-101 on 15-Jul-2026 from 10 AM to 11 AM for Physics lecture.",
+            "Reserve any available classroom on 17-Jul-2026 from 9 AM to 10:30 AM for project discussion.",
+            "Find a classroom for 12 people on 20-Jul-2026 from 2 PM to 3 PM.",
+        ],
+        "Capacity questions": [
+            "What is the capacity of Room-101?",
+            "Which rooms can fit 25 participants on 22-Jul-2026 from 9 AM to 10:30 AM?",
+        ],
+        "Modify or delete booking": [
+            "Change booking 12 to Room-101 on 21-Jul-2026 from 1 PM to 2 PM.",
+            "Cancel booking 15.",
         ],
         "Recurring booking": [
-            "Book Room B every Monday from 20-Jul-2026 to 14-Sep-2026, 11:00 to 12:00, for Chemistry lab.",
-            "Create a weekly booking for Room C starting 22-Jul-2026 from 15:00 to 16:00 for 8 occurrences named Tutorial session.",
+            "Book Room-101 every Monday from 20-Jul-2026 to 14-Sep-2026, 11 AM to 12 PM, for Chemistry lab.",
+            "Create a weekly booking for Room-102 starting 22-Jul-2026 from 3 PM to 4 PM for 8 occurrences named Tutorial session.",
         ],
         "Modify booking": [
-            "Change booking 12 to Room B on 21-Jul-2026 from 13:00 to 14:00.",
+            "Change booking 12 to Room-101 on 21-Jul-2026 from 1 PM to 2 PM.",
             "Update the title of booking 15 to Guest lecture.",
         ],
         "Delete booking": [
@@ -153,10 +164,19 @@ def render_sample_prompts() -> None:
         ],
     }
     with st.expander("Sample prompts", expanded=False):
+        st.subheader("Booking IDs")
+        st.info("Find booking IDs in the My Bookings tab — use these IDs to modify or cancel bookings.")
         for heading, prompts in examples.items():
             st.markdown(f"**{heading}**")
-            for prompt in prompts:
-                st.code(prompt, language="text")
+            for i, p in enumerate(prompts):
+                cols = st.columns([0.85, 0.15])
+                cols[0].code(p, language="text")
+                if cols[1].button("Copy", key=f"copy_{heading}_{i}"):
+                    st.session_state["chat_input"] = p
+                    try:
+                        st.experimental_rerun()
+                    except Exception:
+                        st.success("Prompt copied to chat input. Click the chat box to edit and submit.")
 
 
 def render_calendar(conn, user: dict, tab) -> None:
@@ -169,16 +189,15 @@ def render_calendar(conn, user: dict, tab) -> None:
         with col2:
             end = st.date_input("To", today + timedelta(days=45), key="cal_to")
         with col3:
-            view = st.selectbox(
-                "View",
-                [
-                    "dayGridMonth",
-                    "timeGridWeek",
-                    "timeGridDay",
-                    "listWeek",
-                    "multiMonthYear",
-                ],
-            )
+            view_options = {
+                "Month": "dayGridMonth",
+                "Week": "timeGridWeek",
+                "Day": "timeGridDay",
+                "List (week)": "listWeek",
+                "Multi-month": "multiMonthYear",
+            }
+            selected_view_label = st.selectbox("View", list(view_options.keys()), index=0)
+            view = view_options[selected_view_label]
         closed_weekdays = service.get_closed_weekdays(conn)
         rows = service.list_bookings(conn, start_date=start, end_date=end)
         events = [

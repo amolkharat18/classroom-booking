@@ -235,6 +235,7 @@ def check_availability(
     start_value: str | datetime,
     end_value: str | datetime,
     room_id: int | None = None,
+    min_capacity: int = 0,
 ) -> list[dict]:
     start = parse_dt(start_value)
     end = parse_dt(end_value)
@@ -242,11 +243,15 @@ def check_availability(
     rooms = [get_room(conn, room_id)] if room_id else list_rooms(conn)
     result = []
     for room in [room for room in rooms if room]:
+        if room["capacity"] < (min_capacity or 0):
+            continue
         conflicts = find_conflicts(conn, int(room["id"]), start, end)
         result.append(
             {
                 "room_id": int(room["id"]),
                 "room_name": room["name"],
+                "capacity": int(room["capacity"]),
+                "location": room["location"],
                 "available": not conflicts,
                 "conflicts": [
                     {
@@ -261,6 +266,33 @@ def check_availability(
             }
         )
     return result
+
+
+def suggest_rooms(
+    conn: sqlite3.Connection,
+    start_value: str | datetime,
+    end_value: str | datetime,
+    min_capacity: int = 0,
+) -> list[dict]:
+    availability = check_availability(conn, start_value, end_value, None, min_capacity)
+    return sorted(
+        [room for room in availability if room["available"]],
+        key=lambda room: (room["capacity"], room["room_name"]),
+    )
+
+
+def get_room_info(conn: sqlite3.Connection, room_name: str) -> dict[str, object]:
+    room = get_room_by_name(conn, room_name)
+    if not room or not room["is_active"]:
+        raise ValueError(f"Room not found or inactive: {room_name}")
+    return {
+        "room_id": int(room["id"]),
+        "room_name": room["name"],
+        "capacity": int(room["capacity"]),
+        "location": room["location"],
+        "color": room["color"],
+        "is_active": bool(room["is_active"]),
+    }
 
 
 def _insert_booking(
