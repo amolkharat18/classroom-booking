@@ -412,11 +412,13 @@ def render_heatmap(conn, tab) -> None:
 def render_admin(conn, user: dict, tab) -> None:
     with tab:
         st.subheader("Admin")
-        room_tab, user_tab, holiday_tab, audit_tab = st.tabs(["Rooms", "Users", "Holidays", "Audit"])
+        room_tab, user_tab, report_tab, holiday_tab, audit_tab = st.tabs(["Rooms", "Users", "Reports", "Holidays", "Audit"])
         with room_tab:
             admin_rooms(conn, user)
         with user_tab:
             admin_users(conn, user)
+        with report_tab:
+            admin_reports(conn)
         with holiday_tab:
             admin_holidays(conn, user)
         with audit_tab:
@@ -488,6 +490,52 @@ def admin_users(conn, user: dict) -> None:
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
+
+
+def admin_reports(conn) -> None:
+    st.markdown("#### Booking Reports")
+    c1, c2 = st.columns(2)
+    today = date.today()
+    start = c1.date_input("Analytics from", today.replace(day=1), key="report_from")
+    end = c2.date_input("Analytics to", today + timedelta(days=30), key="report_to")
+    if start > end:
+        st.error("Start date must be before end date.")
+        return
+
+    user_summary = analytics.user_bookings_summary(conn, start, end)
+    room_summary = analytics.room_booking_summary(conn, start, end)
+    weekday_summary = analytics.weekday_booking_summary(conn, start, end)
+
+    total_bookings = user_summary["total_bookings"].sum() if not user_summary.empty else 0
+    total_hours = room_summary["total_hours"].sum() if not room_summary.empty else 0.0
+    most_used_room = room_summary.iloc[0]["room"] if not room_summary.empty else "N/A"
+    least_used_room = room_summary.iloc[-1]["room"] if not room_summary.empty else "N/A"
+    most_active_user = user_summary.iloc[0]["user"] if not user_summary.empty else "N/A"
+
+    st.markdown("##### Key metrics")
+    metrics = {
+        "Total bookings": total_bookings,
+        "Total booked hours": total_hours,
+        "Most active user": most_active_user,
+        "Most used room": most_used_room,
+        "Least used room": least_used_room,
+    }
+    cols = st.columns(5)
+    for col, (label, value) in zip(cols, metrics.items()):
+        col.metric(label, value)
+
+    st.markdown("##### Booking activity by user")
+    if user_summary.empty:
+        st.info("No bookings found in this period.")
+    else:
+        st.dataframe(user_summary, use_container_width=True)
+
+    st.markdown("##### Room utilization and booking volumes")
+    st.dataframe(room_summary, use_container_width=True)
+
+    st.markdown("##### Bookings by weekday")
+    if not weekday_summary.empty:
+        st.dataframe(weekday_summary, use_container_width=True)
 
 
 def admin_holidays(conn, user: dict) -> None:
