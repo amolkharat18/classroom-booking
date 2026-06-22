@@ -502,6 +502,13 @@ def admin_reports(conn) -> None:
         st.error("Start date must be before end date.")
         return
 
+    if not hasattr(analytics, "user_bookings_summary") or not hasattr(analytics, "room_booking_summary"):
+        st.error(
+            "Admin report functionality is not available in the deployed app version yet. "
+            "Please redeploy with the latest code changes."
+        )
+        return
+
     user_summary = analytics.user_bookings_summary(conn, start, end)
     room_summary = analytics.room_booking_summary(conn, start, end)
     weekday_summary = analytics.weekday_booking_summary(conn, start, end)
