@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
-<<<<<<< HEAD
 import base64
 import html
 import inspect
 import io
-=======
->>>>>>> parent of ef67cef (UI improvements)
 
 import pandas as pd
 import plotly.express as px
@@ -35,8 +32,6 @@ def get_conn():
     init_db(conn)
     return conn
 
-
-<<<<<<< HEAD
 def speak_text(text: str) -> None:
     # Try server-side TTS first (higher quality, consistent audio format),
     # but respect the user's preference in `st.session_state.use_server_tts`.
@@ -448,9 +443,6 @@ def section_card(title: str, subtitle: str = "") -> None:
         unsafe_allow_html=True,
     )
 
-
-=======
->>>>>>> parent of ef67cef (UI improvements)
 def main() -> None:
     conn = get_conn()
     st.title(APP_NAME)
@@ -468,15 +460,11 @@ def main() -> None:
     with st.sidebar:
         st.markdown(f"Signed in as **{user['username']}**")
         st.caption("Admin" if user["is_admin"] else "User")
-<<<<<<< HEAD
         st.divider()
         st.markdown("**Signed in as**")
         st.markdown(f"<strong>{user['username']}</strong>", unsafe_allow_html=True)
         st.write("")
-        if st.button("Sign out"):
-=======
         if st.button("Sign out", use_container_width=True):
->>>>>>> parent of ef67cef (UI improvements)
             st.session_state.clear()
             st.rerun()
 
@@ -828,7 +816,6 @@ def render_sample_prompts() -> None:
         for heading, prompts in examples.items():
             st.markdown(f"**{heading}**")
             for i, p in enumerate(prompts):
-<<<<<<< HEAD
                 cols = st.columns([0.84, 0.16], gap="small")
                 cols[0].markdown(
                     f"<div class='sample-prompt-card'><code>{html.escape(p)}</code></div>",
@@ -842,16 +829,6 @@ def render_sample_prompts() -> None:
                         except Exception:
                             st.success("Prompt copied to chat input. Click the chat box to edit and submit.")
                 st.markdown("<div style='height:0.55rem'></div>", unsafe_allow_html=True)
-=======
-                cols = st.columns([0.85, 0.15])
-                cols[0].code(p, language="text")
-                if cols[1].button("Copy", key=f"copy_{heading}_{i}"):
-                    st.session_state["chat_input"] = p
-                    try:
-                        st.experimental_rerun()
-                    except Exception:
-                        st.success("Prompt copied to chat input. Click the chat box to edit and submit.")
->>>>>>> parent of ef67cef (UI improvements)
 
 
 def render_calendar(conn, user: dict, tab) -> None:
@@ -1077,19 +1054,11 @@ def render_heatmap(conn, tab) -> None:
                 color_continuous_scale="Blues",
                 labels={"color": "Booked hours"},
             )
-<<<<<<< HEAD
-            st.plotly_chart(fig)
-        util = analytics.utilization_dataframe(conn, start, end)
-        if not util.empty:
-            st.markdown("#### Utilization")
-            st.dataframe(util, hide_index=True)
-=======
             st.plotly_chart(fig, use_container_width=True)
         util = analytics.utilization_dataframe(conn, start, end)
         if not util.empty:
             st.markdown("#### Utilization")
             st.dataframe(util, use_container_width=True, hide_index=True)
->>>>>>> parent of ef67cef (UI improvements)
 
 
 def render_admin(conn, user: dict, tab) -> None:
@@ -1106,11 +1075,7 @@ def render_admin(conn, user: dict, tab) -> None:
             admin_holidays(conn, user)
         with audit_tab:
             rows = conn.execute("SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 200").fetchall()
-<<<<<<< HEAD
-            st.dataframe(pd.DataFrame([dict(row) for row in rows]), hide_index=True)
-=======
             st.dataframe(pd.DataFrame([dict(row) for row in rows]), use_container_width=True, hide_index=True)
->>>>>>> parent of ef67cef (UI improvements)
 
 
 def admin_rooms(conn, user: dict) -> None:
@@ -1222,16 +1187,6 @@ def admin_reports(conn) -> None:
     if user_summary.empty:
         st.info("No bookings found in this period.")
     else:
-<<<<<<< HEAD
-        st.dataframe(user_summary)
-
-    st.markdown("##### Room utilization and booking volumes")
-    st.dataframe(room_summary)
-
-    st.markdown("##### Bookings by weekday")
-    if not weekday_summary.empty:
-        st.dataframe(weekday_summary)
-=======
         st.dataframe(user_summary, use_container_width=True)
 
     st.markdown("##### Room utilization and booking volumes")
@@ -1240,7 +1195,6 @@ def admin_reports(conn) -> None:
     st.markdown("##### Bookings by weekday")
     if not weekday_summary.empty:
         st.dataframe(weekday_summary, use_container_width=True)
->>>>>>> parent of ef67cef (UI improvements)
 
 
 def admin_holidays(conn, user: dict) -> None:
