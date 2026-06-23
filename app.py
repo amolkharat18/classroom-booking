@@ -26,6 +26,35 @@ except Exception:
 st.set_page_config(page_title=APP_NAME, page_icon=":school:", layout="wide")
 
 
+def _friendly_column_name(column: str) -> str:
+    mapping = {
+        "id": "ID",
+        "room_id": "Room ID",
+        "user_id": "User ID",
+        "series_id": "Series ID",
+        "booking_id": "Booking ID",
+        "is_admin": "Is Admin",
+        "is_active": "Is Active",
+        "start_ts": "Start Time",
+        "end_ts": "End Time",
+        "created_at": "Created At",
+        "updated_at": "Updated At",
+        "created_by": "Created By",
+        "holiday_date": "Holiday Date",
+    }
+    if column in mapping:
+        return mapping[column]
+    return column.replace("_", " ").title()
+
+
+def _friendly_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    renamed = df.rename(columns={col: _friendly_column_name(str(col)) for col in df.columns})
+    for column in list(renamed.columns):
+        if "percent" in column.lower() and pd.api.types.is_numeric_dtype(renamed[column]):
+            renamed[column] = renamed[column].map(lambda value: f"{value:g}%")
+    return renamed
+
+
 @st.cache_resource
 def get_conn():
     conn = connect(default_db_path())
@@ -468,17 +497,24 @@ def main() -> None:
             st.session_state.clear()
             st.rerun()
 
-    tabs = ["Chat", "Voice Agent", "Calendar", "My Bookings", "Availability Heatmap"]
+    tab_renderers: list[tuple[str, Any]] = [
+        ("Chat", lambda current_tab: render_chat(conn, user, current_tab)),
+    ]
+    if service.get_voice_agent_enabled(conn):
+        tab_renderers.append(("Voice Agent", lambda current_tab: render_voice_agent(conn, user, current_tab)))
+    tab_renderers.extend(
+        [
+            ("Calendar", lambda current_tab: render_calendar(conn, user, current_tab)),
+            ("My Bookings", lambda current_tab: render_my_bookings(conn, user, current_tab)),
+            ("Availability Heatmap", lambda current_tab: render_heatmap(conn, current_tab)),
+        ]
+    )
     if user["is_admin"]:
-        tabs.append("Admin")
-    selected_tabs = st.tabs(tabs)
-    render_chat(conn, user, selected_tabs[0])
-    render_voice_agent(conn, user, selected_tabs[1])
-    render_calendar(conn, user, selected_tabs[2])
-    render_my_bookings(conn, user, selected_tabs[3])
-    render_heatmap(conn, selected_tabs[4])
-    if user["is_admin"]:
-        render_admin(conn, user, selected_tabs[5])
+        tab_renderers.append(("Admin", lambda current_tab: render_admin(conn, user, current_tab)))
+
+    selected_tabs = st.tabs([name for name, _ in tab_renderers])
+    for current_tab, (_, renderer) in zip(selected_tabs, tab_renderers):
+        renderer(current_tab)
 
 
 def first_admin_form(conn) -> None:
@@ -529,18 +565,58 @@ def render_chat(conn, user: dict, tab) -> None:
         if "chat_input" not in st.session_state:
             st.session_state["chat_input"] = ""
         prompt = st.chat_input("Example: Book Room-101 tomorrow 10 AM to 11 AM for Physics", key="chat_input")
+        if st.session_state.get("focus_chat_input"):
+            st.markdown(
+                """
+                <script>
+                const findAndFocusChatInput = () => {
+                    const candidates = [...document.querySelectorAll('textarea, input')];
+                    const input = candidates.find(el => {
+                        const placeholder = (el.placeholder || '').toString().toLowerCase();
+                        const aria = (el.getAttribute('aria-label') || '').toString().toLowerCase();
+                        return (
+                            placeholder.includes('example: book room') ||
+                            placeholder.includes('your message') ||
+                            aria.includes('example: book room') ||
+                            aria.includes('your message')
+                        );
+                    }) || candidates.find(el => el.type === 'text' || el.tagName.toLowerCase() === 'textarea');
+                    if (input) {
+                        input.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        input.focus();
+                        const length = input.value.length;
+                        if (typeof input.setSelectionRange === 'function') {
+                            input.setSelectionRange(length, length);
+                        }
+                        return true;
+                    }
+                    return false;
+                };
+                let attempts = 0;
+                const interval = setInterval(() => {
+                    if (findAndFocusChatInput() || attempts++ > 40) {
+                        clearInterval(interval);
+                    }
+                }, 50);
+                </script>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.session_state["focus_chat_input"] = False
         if prompt:
             st.session_state.chat_messages.append({"role": "user", "content": prompt})
             if st.session_state.get("pending_tool") and prompt.strip().lower() in {"confirm", "yes", "proceed"}:
                 pending = st.session_state.pop("pending_tool")
                 try:
-                    result = agent.execute_tool(conn, user, pending["name"], pending["arguments"])
-                    reply = f"Confirmed. Result: `{result}`"
+                    with st.spinner("Processing your confirmation..."):
+                        result = agent.execute_tool(conn, user, pending["name"], pending["arguments"])
+                    reply = agent.format_action_result(result)
                 except Exception as exc:
                     reply = f"I could not complete that action: {exc}"
             else:
                 try:
-                    result = agent.chat(conn, user, st.session_state.chat_messages, api_key)
+                    with st.spinner("Waiting for assistant response..."):
+                        result = agent.chat(conn, user, st.session_state.chat_messages, api_key)
                     reply = result.message
                     if result.pending_tool:
                         st.session_state.pending_tool = result.pending_tool
@@ -728,7 +804,7 @@ def render_voice_agent(conn, user: dict, tab) -> None:
                         pending = st.session_state.pop("voice_pending_tool")
                         try:
                             result = agent.execute_tool(conn, user, pending["name"], pending["arguments"])
-                            reply = f"Confirmed. Result: `{result}`"
+                            reply = agent.format_action_result(result)
                         except Exception as exc:
                             reply = f"I could not complete that action: {exc}"
                     else:
@@ -755,13 +831,13 @@ def render_voice_agent(conn, user: dict, tab) -> None:
         if st.session_state.voice_pending_tool:
             pending = st.session_state.voice_pending_tool
             st.warning(
-                f"Confirm the following action before it runs: {pending['name']} with {pending['arguments']}"
+                f"Confirm the following action before it runs: {agent.format_pending_tool(pending['name'], pending['arguments'])}"
             )
             confirm_col, cancel_col = st.columns(2)
             if confirm_col.button("Confirm voice action", key="voice_confirm"):
                 try:
                     result = agent.execute_tool(conn, user, pending["name"], pending["arguments"])
-                    confirmation = f"Confirmed. Result: `{result}`"
+                    confirmation = agent.format_action_result(result)
                     st.session_state.voice_messages.append(
                         {"role": "assistant", "content": confirmation}
                     )
@@ -792,6 +868,11 @@ def render_sample_prompts() -> None:
         "Capacity questions": [
             "What is the capacity of Room-101?",
             "Which rooms can fit 25 participants on 22-Jul-2026 from 9 AM to 10:30 AM?",
+        ],
+        "Holiday queries": [
+            "Is 15-Aug-2026 marked as a holiday?",
+            "List holidays between 01-Jul-2026 and 31-Dec-2026.",
+            "Which weekdays are closed for booking every week?",
         ],
         "Modify or delete booking": [
             "Change booking 12 to Room-101 on 21-Jul-2026 from 1 PM to 2 PM.",
@@ -824,6 +905,7 @@ def render_sample_prompts() -> None:
                 with cols[1]:
                     if st.button("Copy", key=f"copy_{heading}_{i}"):
                         st.session_state["chat_input"] = p
+                        st.session_state["focus_chat_input"] = True
                         try:
                             st.rerun()
                         except Exception:
@@ -848,14 +930,24 @@ def render_calendar(conn, user: dict, tab) -> None:
                 "List (week)": "listWeek",
                 "Multi-month": "multiMonthYear",
             }
-            selected_view_label = st.selectbox("View", list(view_options.keys()), index=0)
+            if "cal_view" not in st.session_state:
+                st.session_state["cal_view"] = "Month"
+            selected_view_label = st.selectbox(
+                "View",
+                list(view_options.keys()),
+                key="cal_view",
+            )
             view = view_options[selected_view_label]
         closed_weekdays = service.get_closed_weekdays(conn)
         rows = service.list_bookings(conn, start_date=start, end_date=end)
         events = [
             {
                 "id": str(row["id"]),
-                "title": f"{row['room_name']}: {row['title']}",
+                "title": (
+                    f"{service.db_to_dt(row['start_ts']).hour:02d}-"
+                    f"{service.db_to_dt(row['end_ts']).hour:02d} "
+                    f"{row['room_name']} {row['title']} {row['username']}"
+                ),
                 "start": row["start_ts"],
                 "end": row["end_ts"],
                 "backgroundColor": row["room_color"],
@@ -871,6 +963,7 @@ def render_calendar(conn, user: dict, tab) -> None:
                 "selectable": True,
                 "editable": False,
                 "nowIndicator": True,
+                "displayEventTime": False,
                 "hiddenDays": fullcalendar_hidden_days(closed_weekdays),
                 "headerToolbar": {
                     "left": "prev,next today",
@@ -881,7 +974,7 @@ def render_calendar(conn, user: dict, tab) -> None:
             calendar(events=events, options=options, key=f"calendar_{view}_{start}_{end}")
         else:
             st.warning("Install streamlit-calendar for interactive calendar views.")
-            st.dataframe(pd.DataFrame(events), width="stretch")
+            st.dataframe(_friendly_dataframe(pd.DataFrame(events)), width="stretch")
         st.caption("Date-specific holidays are shown in red. Weekly closed days are hidden and cannot be booked.")
 
         st.divider()
@@ -1058,13 +1151,15 @@ def render_heatmap(conn, tab) -> None:
         util = analytics.utilization_dataframe(conn, start, end)
         if not util.empty:
             st.markdown("#### Utilization")
-            st.dataframe(util, width="stretch", hide_index=True)
+            st.dataframe(_friendly_dataframe(util), width="stretch", hide_index=True)
 
 
 def render_admin(conn, user: dict, tab) -> None:
     with tab:
         st.subheader("Admin")
-        room_tab, user_tab, report_tab, holiday_tab, audit_tab = st.tabs(["Rooms", "Users", "Reports", "Holidays", "Audit"])
+        room_tab, user_tab, report_tab, holiday_tab, audit_tab, settings_tab = st.tabs(
+            ["Rooms", "Users", "Reports", "Holidays", "Audit", "Settings"]
+        )
         with room_tab:
             admin_rooms(conn, user)
         with user_tab:
@@ -1074,8 +1169,43 @@ def render_admin(conn, user: dict, tab) -> None:
         with holiday_tab:
             admin_holidays(conn, user)
         with audit_tab:
-            rows = conn.execute("SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 200").fetchall()
-            st.dataframe(pd.DataFrame([dict(row) for row in rows]), width="stretch", hide_index=True)
+            rows = conn.execute(
+                """
+                SELECT
+                    a.id,
+                    COALESCE(u.username, 'System') AS username,
+                    a.action,
+                    a.entity_type,
+                    a.entity_id,
+                    a.details,
+                    a.created_at
+                FROM audit_log a
+                LEFT JOIN users u ON u.id = a.user_id
+                ORDER BY a.created_at DESC
+                LIMIT 200
+                """
+            ).fetchall()
+            st.dataframe(_friendly_dataframe(pd.DataFrame([dict(row) for row in rows])), width="stretch", hide_index=True)
+        with settings_tab:
+            admin_settings(conn, user)
+
+
+def admin_settings(conn, user: dict) -> None:
+    st.markdown("#### App Settings")
+    with st.form("app_settings_voice_agent"):
+        voice_agent_enabled = st.checkbox(
+            "Enable Voice Agent tab",
+            value=service.get_voice_agent_enabled(conn),
+            help="When disabled, the Voice Agent tab is hidden for all users.",
+        )
+        submitted = st.form_submit_button("Save settings")
+    if submitted:
+        try:
+            service.set_voice_agent_enabled(conn, voice_agent_enabled, user)
+            st.success("Settings saved.")
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
 
 
 def admin_rooms(conn, user: dict) -> None:
@@ -1187,14 +1317,14 @@ def admin_reports(conn) -> None:
     if user_summary.empty:
         st.info("No bookings found in this period.")
     else:
-        st.dataframe(user_summary, width="stretch")
+        st.dataframe(_friendly_dataframe(user_summary), width="stretch")
 
     st.markdown("##### Room utilization and booking volumes")
-    st.dataframe(room_summary, width="stretch")
+    st.dataframe(_friendly_dataframe(room_summary), width="stretch")
 
     st.markdown("##### Bookings by weekday")
     if not weekday_summary.empty:
-        st.dataframe(weekday_summary, width="stretch")
+        st.dataframe(_friendly_dataframe(weekday_summary), width="stretch")
 
 
 def admin_holidays(conn, user: dict) -> None:

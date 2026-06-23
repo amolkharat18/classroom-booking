@@ -59,6 +59,9 @@ def init_db(conn: sqlite3.Connection) -> None:
         INSERT OR IGNORE INTO app_settings (key, value)
         VALUES ('closed_weekdays', '5,6');
 
+        INSERT OR IGNORE INTO app_settings (key, value)
+        VALUES ('voice_agent_enabled', '0');
+
         CREATE TABLE IF NOT EXISTS recurrence_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             frequency TEXT NOT NULL CHECK (frequency IN ('daily', 'weekly', 'monthly')),

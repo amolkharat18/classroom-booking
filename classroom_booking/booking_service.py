@@ -136,6 +136,28 @@ def set_closed_weekdays(conn: sqlite3.Connection, weekdays: set[int] | list[int]
     log_action(conn, actor["id"], "set_closed_weekdays", "setting", None, ",".join(str(weekday) for weekday in cleaned))
 
 
+def get_voice_agent_enabled(conn: sqlite3.Connection) -> bool:
+    row = conn.execute("SELECT value FROM app_settings WHERE key = 'voice_agent_enabled'").fetchone()
+    if not row:
+        return False
+    value = (row["value"] or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def set_voice_agent_enabled(conn: sqlite3.Connection, enabled: bool, actor: dict) -> None:
+    require_admin(actor)
+    conn.execute(
+        """
+        INSERT INTO app_settings (key, value, updated_at)
+        VALUES ('voice_agent_enabled', ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+        """,
+        ("1" if enabled else "0",),
+    )
+    conn.commit()
+    log_action(conn, actor["id"], "set_voice_agent_enabled", "setting", None, f"enabled={int(enabled)}")
+
+
 def closed_dates_between(conn: sqlite3.Connection, start: datetime, end: datetime) -> set[str]:
     closed_weekdays = get_closed_weekdays(conn)
     if not closed_weekdays:
@@ -386,37 +408,17 @@ def update_booking(
     end_value: str | datetime | None = None,
     scope: str = "single",
 ) -> int:
-    booking = get_booking(conn, booking_id)
-    if not booking:
-        raise ValueError("Booking not found.")
-    can_manage_booking(actor, booking)
-    target_ids = _scope_booking_ids(conn, booking, scope)
-    original_start = db_to_dt(booking["start_ts"])
-    original_end = db_to_dt(booking["end_ts"])
-    duration = original_end - original_start
-    new_room_id = room_id or int(booking["room_id"])
+    booking, target_ids, new_room_id, updates = _plan_booking_update(
+        conn=conn,
+        booking_id=booking_id,
+        actor=actor,
+        room_id=room_id,
+        start_value=start_value,
+        end_value=end_value,
+        scope=scope,
+    )
+
     exclude_ids = set(target_ids)
-
-    updates: list[tuple[int, datetime, datetime]] = []
-    for target_id in target_ids:
-        row = get_booking(conn, target_id)
-        row_start = db_to_dt(row["start_ts"])
-        if start_value is not None and target_id == booking_id:
-            new_start = parse_dt(start_value)
-        elif start_value is not None and scope == "series":
-            delta = parse_dt(start_value) - original_start
-            new_start = row_start + delta
-        else:
-            new_start = row_start
-        if end_value is not None and target_id == booking_id:
-            new_end = parse_dt(end_value)
-        elif end_value is not None and scope == "series":
-            new_duration = parse_dt(end_value) - parse_dt(start_value) if start_value is not None else parse_dt(end_value) - original_start
-            new_end = new_start + new_duration
-        else:
-            new_end = new_start + duration
-        updates.append((target_id, new_start, new_end))
-
     for _, new_start, new_end in updates:
         validate_time_window(conn, new_start, new_end)
         conflicts = find_conflicts(conn, new_room_id, new_start, new_end, exclude_ids)
@@ -440,6 +442,86 @@ def update_booking(
     conn.commit()
     log_action(conn, actor["id"], "update_booking", "booking", booking_id, f"scope={scope}")
     return len(target_ids)
+
+
+def preview_update_booking(
+    conn: sqlite3.Connection,
+    booking_id: int,
+    actor: dict,
+    room_id: int | None = None,
+    start_value: str | datetime | None = None,
+    end_value: str | datetime | None = None,
+    scope: str = "single",
+) -> dict[str, object]:
+    booking, target_ids, new_room_id, updates = _plan_booking_update(
+        conn=conn,
+        booking_id=booking_id,
+        actor=actor,
+        room_id=room_id,
+        start_value=start_value,
+        end_value=end_value,
+        scope=scope,
+    )
+
+    exclude_ids = set(target_ids)
+    for _, new_start, new_end in updates:
+        validate_time_window(conn, new_start, new_end)
+        conflicts = find_conflicts(conn, new_room_id, new_start, new_end, exclude_ids)
+        if conflicts:
+            first = conflicts[0]
+            return {
+                "ok": False,
+                "booking_id": int(booking["id"]),
+                "scope": scope,
+                "conflict": {
+                    "booking_id": int(first["id"]),
+                    "title": first["title"],
+                    "start": first["start_ts"],
+                    "end": first["end_ts"],
+                },
+            }
+    return {"ok": True, "booking_id": int(booking["id"]), "scope": scope, "updated_count": len(target_ids)}
+
+
+def _plan_booking_update(
+    conn: sqlite3.Connection,
+    booking_id: int,
+    actor: dict,
+    room_id: int | None = None,
+    start_value: str | datetime | None = None,
+    end_value: str | datetime | None = None,
+    scope: str = "single",
+) -> tuple[sqlite3.Row, list[int], int, list[tuple[int, datetime, datetime]]]:
+    booking = get_booking(conn, booking_id)
+    if not booking:
+        raise ValueError("Booking not found.")
+    can_manage_booking(actor, booking)
+    target_ids = _scope_booking_ids(conn, booking, scope)
+    original_start = db_to_dt(booking["start_ts"])
+    original_end = db_to_dt(booking["end_ts"])
+    duration = original_end - original_start
+    new_room_id = room_id or int(booking["room_id"])
+
+    updates: list[tuple[int, datetime, datetime]] = []
+    for target_id in target_ids:
+        row = get_booking(conn, target_id)
+        row_start = db_to_dt(row["start_ts"])
+        if start_value is not None and target_id == booking_id:
+            new_start = parse_dt(start_value)
+        elif start_value is not None and scope == "series":
+            delta = parse_dt(start_value) - original_start
+            new_start = row_start + delta
+        else:
+            new_start = row_start
+        if end_value is not None and target_id == booking_id:
+            new_end = parse_dt(end_value)
+        elif end_value is not None and scope == "series":
+            new_duration = parse_dt(end_value) - parse_dt(start_value) if start_value is not None else parse_dt(end_value) - original_start
+            new_end = new_start + new_duration
+        else:
+            new_end = new_start + duration
+        updates.append((target_id, new_start, new_end))
+    return booking, target_ids, new_room_id, updates
 
 
 def delete_booking(conn: sqlite3.Connection, booking_id: int, actor: dict, scope: str = "single") -> int:

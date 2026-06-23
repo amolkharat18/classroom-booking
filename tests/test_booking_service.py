@@ -157,3 +157,21 @@ def test_admin_can_clear_weekly_closed_days(conn, users):
         teacher,
     )
     assert len(ids) == 1
+
+
+def test_voice_agent_enabled_default_false(conn):
+    assert service.get_voice_agent_enabled(conn) is False
+
+
+def test_admin_can_toggle_voice_agent_setting(conn, users):
+    admin, _ = users
+    service.set_voice_agent_enabled(conn, False, admin)
+    assert service.get_voice_agent_enabled(conn) is False
+    service.set_voice_agent_enabled(conn, True, admin)
+    assert service.get_voice_agent_enabled(conn) is True
+
+
+def test_non_admin_cannot_toggle_voice_agent_setting(conn, users):
+    _, teacher = users
+    with pytest.raises(PermissionError):
+        service.set_voice_agent_enabled(conn, False, teacher)

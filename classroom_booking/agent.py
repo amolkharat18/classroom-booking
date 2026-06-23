@@ -14,6 +14,175 @@ from . import booking_service as service
 
 
 DESTRUCTIVE_TOOLS = {"update_booking", "delete_booking"}
+UPDATE_MUTABLE_FIELDS = ("title", "room_name", "start", "end")
+
+
+def _format_tool_argument(name: str, value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    if name == "booking_id":
+        return f"booking #{value}"
+    if name == "room_name":
+        return f"room '{value}'"
+    if name == "title":
+        return f"title '{value}'"
+    if name == "start":
+        return f"start {value}"
+    if name == "end":
+        return f"end {value}"
+    if name == "scope":
+        return f"scope {value}"
+    if name == "recurrence_frequency":
+        return f"recurrence {value}"
+    if name == "recurrence_until":
+        return f"until {value}"
+    if name == "occurrence_count":
+        return f"{value} occurrences"
+    return f"{name.replace('_', ' ')} {value}"
+
+
+def format_tool_confirmation_message(tool_name: str, args: dict[str, Any]) -> str:
+    details = [
+        _format_tool_argument(name, args.get(name))
+        for name in [
+            "booking_id",
+            "title",
+            "room_name",
+            "start",
+            "end",
+            "scope",
+            "recurrence_frequency",
+            "recurrence_until",
+            "occurrence_count",
+        ]
+        if args.get(name) is not None
+    ]
+    if not details:
+        details = [
+            _format_tool_argument(name, value)
+            for name, value in args.items()
+            if value is not None
+        ]
+    details_text = ", ".join([d for d in details if d])
+    action = tool_name.replace("_", " ")
+    if details_text:
+        return f"I can {action} {details_text}. Reply `confirm` to proceed."
+    return f"I can {action}. Reply `confirm` to proceed."
+
+
+def format_pending_tool(tool_name: str, args: dict[str, Any]) -> str:
+    action = tool_name.replace("_", " ")
+    details = [
+        _format_tool_argument(name, args.get(name))
+        for name in [
+            "booking_id",
+            "title",
+            "room_name",
+            "start",
+            "end",
+            "scope",
+            "recurrence_frequency",
+            "recurrence_until",
+            "occurrence_count",
+        ]
+        if args.get(name) is not None
+    ]
+    if not details:
+        details = [
+            _format_tool_argument(name, value)
+            for name, value in args.items()
+            if value is not None
+        ]
+    details_text = ", ".join([d for d in details if d])
+    if details_text:
+        return f"{action} {details_text}."
+    return f"{action}."
+
+
+def format_created_bookings_message(booking_ids: list[Any]) -> str:
+    ids = [str(i) for i in booking_ids]
+    if len(ids) == 1:
+        return f"Your new booking ID is {ids[0]}. Please note it down for future modification or deletion."
+    return f"Your new booking IDs are {', '.join(ids)}. Please note them down for future modification or deletion."
+
+
+def format_action_result(result: dict[str, Any]) -> str:
+    if "updated_count" in result:
+        count = int(result["updated_count"])
+        return f"Confirmed. Updated {count} booking{'s' if count != 1 else ''}."
+    if "deleted_count" in result:
+        count = int(result["deleted_count"])
+        return f"Confirmed. Deleted {count} booking{'s' if count != 1 else ''}."
+    if "created_booking_ids" in result:
+        count = len(result["created_booking_ids"])
+        ids = result["created_booking_ids"]
+        if count == 1:
+            return f"Confirmed. Created 1 booking, ID {ids[0]}. Please note it down for future modification or deletion."
+        return f"Confirmed. Created {count} bookings, IDs {', '.join(str(i) for i in ids)}. Please note them down for future modification or deletion."
+    return "Confirmed. The action completed successfully."
+
+
+def _prepare_update_confirmation(conn: sqlite3.Connection, user: dict, args: dict[str, Any]) -> AgentResult:
+    booking_id = args.get("booking_id")
+    if booking_id is None:
+        return AgentResult(message="Please provide the booking ID you want to modify.")
+
+    booking = service.get_booking(conn, int(booking_id))
+    if not booking:
+        return AgentResult(message=f"I could not find booking #{booking_id}. Please verify the booking ID.")
+
+    try:
+        service.can_manage_booking(user, booking)
+    except Exception as exc:
+        return AgentResult(message=f"I cannot modify booking #{booking_id}: {exc}")
+
+    has_update_fields = any(args.get(field) is not None for field in UPDATE_MUTABLE_FIELDS)
+    if not has_update_fields:
+        return AgentResult(
+            message=(
+                f"I found booking #{booking_id}: '{booking['title']}' in {booking['room_name']} from "
+                f"{booking['start_ts']} to {booking['end_ts']}. Tell me what to change: title, room, start time, or end time."
+            )
+        )
+
+    resolved_args = {
+        "booking_id": int(booking_id),
+        "title": args.get("title") if args.get("title") is not None else booking["title"],
+        "room_name": args.get("room_name") if args.get("room_name") is not None else booking["room_name"],
+        "start": args.get("start") if args.get("start") is not None else booking["start_ts"],
+        "end": args.get("end") if args.get("end") is not None else booking["end_ts"],
+        "scope": args.get("scope") or "single",
+    }
+
+    try:
+        room_id = _room_id_from_name(conn, resolved_args["room_name"])
+        preview = service.preview_update_booking(
+            conn,
+            booking_id=int(resolved_args["booking_id"]),
+            actor=user,
+            room_id=room_id,
+            start_value=resolved_args.get("start"),
+            end_value=resolved_args.get("end"),
+            scope=resolved_args.get("scope") or "single",
+        )
+    except Exception as exc:
+        return AgentResult(message=f"I checked booking #{booking_id} and found an issue: {exc}")
+
+    if not preview.get("ok"):
+        conflict = preview.get("conflict") or {}
+        return AgentResult(
+            message=(
+                "I found a conflict before confirmation: "
+                f"booking #{conflict.get('booking_id')} ({conflict.get('title')}) from "
+                f"{conflict.get('start')} to {conflict.get('end')}. "
+                "Please provide a different room or time."
+            )
+        )
+
+    return AgentResult(
+        message=format_tool_confirmation_message("update_booking", resolved_args),
+        pending_tool={"name": "update_booking", "arguments": resolved_args},
+    )
 
 
 @dataclass
@@ -171,6 +340,20 @@ def tools_schema() -> list[dict[str, Any]]:
         {
             "type": "function",
             "function": {
+                "name": "list_holidays",
+                "description": "List configured holidays and weekly closed days in an optional date range.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "date_from": {"type": "string", "description": "YYYY-MM-DD"},
+                        "date_to": {"type": "string", "description": "YYYY-MM-DD"},
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "update_booking",
                 "description": "Update a booking. Requires user confirmation before execution.",
                 "parameters": {
@@ -207,9 +390,14 @@ def tools_schema() -> list[dict[str, Any]]:
 
 SYSTEM_PROMPT = """You are a classroom booking assistant.
 Use tools for availability, booking, listing, updating, and deleting.
+You can also answer holiday and weekly closed-day questions.
 Collect missing dates, times, room names, and titles before booking.
 You may also answer questions about room capacity, capacity limits, and suggest rooms based on participant count.
-Use 24-hour local time. Today is supplied by the app context.
+Use 24-hour local time. The current date is always supplied by the app context and is the only authoritative "today" value.
+Do not use your own internal clock or assume a different current date.
+If the user provides a booking date later than the app-supplied current date, treat it as a valid future booking date.
+Never tell the user a future booking date has already passed.
+Only ask the user to confirm or correct the date if the provided date is before the app-supplied current date.
 Destructive updates and deletes are confirmation-gated by the app."""
 
 
@@ -222,7 +410,8 @@ def chat(
 ) -> AgentResult:
     client = OpenAI(api_key=api_key)
     contextual_messages = [
-        {"role": "system", "content": f"{SYSTEM_PROMPT}\nCurrent date: {date.today().isoformat()}."},
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": f"Current date: {date.today().isoformat()}. Use this current date for all booking decisions and date comparisons."},
         *messages[-12:],
     ]
     response = client.chat.completions.create(
@@ -252,9 +441,11 @@ def chat(
     contextual_messages.append(assistant_message)
     for call in tool_calls:
         args = json.loads(call.function.arguments or "{}")
+        if call.function.name == "update_booking":
+            return _prepare_update_confirmation(conn, user, args)
         if call.function.name in DESTRUCTIVE_TOOLS:
             return AgentResult(
-                message=f"I can {call.function.name.replace('_', ' ')} with these details: `{json.dumps(args)}`. Reply `confirm` to proceed.",
+                message=format_tool_confirmation_message(call.function.name, args),
                 pending_tool={"name": call.function.name, "arguments": args},
             )
         result = execute_tool(conn, user, call.function.name, args)
@@ -267,7 +458,16 @@ def chat(
         )
     contextual_messages.extend(tool_messages)
     final_response = client.chat.completions.create(model=model, messages=contextual_messages)
-    return AgentResult(message=final_response.choices[0].message.content or "Done.")
+    message_text = final_response.choices[0].message.content or "Done."
+    created_booking_ids: list[Any] = []
+    for call, result in zip(tool_calls, [json.loads(message["content"]) for message in tool_messages]):
+        if call.function.name == "create_booking" and isinstance(result, dict):
+            created_booking_ids.extend(result.get("created_booking_ids", []))
+    if created_booking_ids:
+        message_text = (
+            f"{message_text}\n\n{format_created_bookings_message(created_booking_ids)}"
+        )
+    return AgentResult(message=message_text)
 
 
 def execute_tool(conn: sqlite3.Connection, user: dict, name: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -319,6 +519,23 @@ def execute_tool(conn: sqlite3.Connection, user: dict, name: str, args: dict[str
         end = service.parse_date(args["date_to"]) if args.get("date_to") else start + timedelta(days=30)
         rows = service.list_bookings(conn, user_id=user["id"], start_date=start, end_date=end)
         return {"bookings": [_booking_summary(row) for row in rows]}
+    if name == "list_holidays":
+        date_from = service.parse_date(args["date_from"]) if args.get("date_from") else None
+        date_to = service.parse_date(args["date_to"]) if args.get("date_to") else None
+        holidays = [
+            {
+                "date": row["holiday_date"],
+                "name": row["name"],
+            }
+            for row in service.list_holidays(conn)
+            if (date_from is None or service.parse_date(row["holiday_date"]) >= date_from)
+            and (date_to is None or service.parse_date(row["holiday_date"]) <= date_to)
+        ]
+        closed_weekdays = [service.WEEKDAY_NAMES[index] for index in sorted(service.get_closed_weekdays(conn))]
+        return {
+            "holidays": holidays,
+            "weekly_closed_days": closed_weekdays,
+        }
     if name == "update_booking":
         room_id = _room_id_from_name(conn, args["room_name"]) if args.get("room_name") else None
         count = service.update_booking(

@@ -105,13 +105,35 @@ def room_booking_summary(conn: sqlite3.Connection, start_date: date | None = Non
 
 def weekday_booking_summary(conn: sqlite3.Connection, start_date: date | None = None, end_date: date | None = None) -> pd.DataFrame:
     df = bookings_dataframe(conn, start_date, end_date)
-    if df.empty:
-        return pd.DataFrame(columns=["weekday", "total_bookings", "total_hours"])
     weekday_order = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    summary = (
+    if df.empty:
+        return pd.DataFrame(columns=["weekday", "total_bookings", "total_hours", "utilization_percent"])
+
+    if start_date and end_date:
+        range_days = pd.date_range(start=start_date, end=end_date, freq="D")
+        weekday_counts = pd.Series(range_days.strftime("%a")).value_counts().reindex(weekday_order, fill_value=0)
+    else:
+        weekday_counts = df["weekday"].value_counts().reindex(weekday_order, fill_value=0)
+
+    active_room_count = int(
+        pd.read_sql_query("SELECT COUNT(*) AS count FROM rooms WHERE is_active = 1", conn).iloc[0]["count"]
+    )
+    available_hours = weekday_counts * 10 * active_room_count
+
+    booked = (
         df.groupby("weekday", as_index=False)
         .agg(total_bookings=("booking_id", "count"), total_hours=("duration_hours", "sum"))
         .round({"total_hours": 1})
     )
+    booked["weekday"] = pd.Categorical(booked["weekday"], categories=weekday_order, ordered=True)
+    booked = booked.set_index("weekday").reindex(weekday_order, fill_value=0).reset_index()
+
+    booked["available_hours"] = booked["weekday"].map(available_hours.to_dict()).fillna(0)
+    booked["utilization_percent"] = (
+        (booked["total_hours"] / booked["available_hours"].replace(0, pd.NA)) * 100
+    ).fillna(0).round(1)
+
+    summary = booked.drop(columns=["available_hours"])
+    summary = summary[summary["weekday"].isin(weekday_counts[weekday_counts > 0].index)]
     summary["weekday"] = pd.Categorical(summary["weekday"], categories=weekday_order, ordered=True)
     return summary.sort_values("weekday")
