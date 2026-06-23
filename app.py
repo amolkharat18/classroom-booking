@@ -55,6 +55,23 @@ def _friendly_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return renamed
 
 
+def _get_voice_agent_enabled(conn) -> bool:
+    getter = getattr(service, "get_voice_agent_enabled", None)
+    if callable(getter):
+        return bool(getter(conn))
+    return False
+
+
+def _set_voice_agent_enabled(conn, enabled: bool, user: dict) -> None:
+    setter = getattr(service, "set_voice_agent_enabled", None)
+    if not callable(setter):
+        raise RuntimeError(
+            "This deployment does not support Voice Agent settings yet. "
+            "Redeploy with the latest backend code."
+        )
+    setter(conn, enabled, user)
+
+
 @st.cache_resource
 def get_conn():
     conn = connect(default_db_path())
@@ -500,7 +517,7 @@ def main() -> None:
     tab_renderers: list[tuple[str, Any]] = [
         ("Chat", lambda current_tab: render_chat(conn, user, current_tab)),
     ]
-    if service.get_voice_agent_enabled(conn):
+    if _get_voice_agent_enabled(conn):
         tab_renderers.append(("Voice Agent", lambda current_tab: render_voice_agent(conn, user, current_tab)))
     tab_renderers.extend(
         [
@@ -1195,13 +1212,13 @@ def admin_settings(conn, user: dict) -> None:
     with st.form("app_settings_voice_agent"):
         voice_agent_enabled = st.checkbox(
             "Enable Voice Agent tab",
-            value=service.get_voice_agent_enabled(conn),
+            value=_get_voice_agent_enabled(conn),
             help="When disabled, the Voice Agent tab is hidden for all users.",
         )
         submitted = st.form_submit_button("Save settings")
     if submitted:
         try:
-            service.set_voice_agent_enabled(conn, voice_agent_enabled, user)
+            _set_voice_agent_enabled(conn, voice_agent_enabled, user)
             st.success("Settings saved.")
             st.rerun()
         except Exception as exc:
