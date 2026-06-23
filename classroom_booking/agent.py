@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import sqlite3
@@ -28,6 +29,60 @@ def openai_api_key_from_streamlit(st_module: Any) -> str | None:
     except Exception:
         pass
     return os.environ.get("OPENAI_API_KEY")
+
+
+def transcribe_audio(audio_bytes: bytes, api_key: str, model: str = "gpt-4o-transcribe") -> str:
+    def detect_filename(data: bytes) -> str:
+        if data.startswith(b"RIFF") and data[8:12] == b"WAVE":
+            return "voice.wav"
+        if data.startswith(b"fLaC"):
+            return "voice.flac"
+        if data.startswith(b"OggS"):
+            return "voice.ogg"
+        if data.startswith(b"ID3") or data.startswith(b"\xff\xfb"):
+            return "voice.mp3"
+        if data.startswith(b"\x1aE\xdf\xa3") or b"webm" in data[:64]:
+            return "voice.webm"
+        return "voice.mp3"
+
+    client = OpenAI(api_key=api_key)
+    filename = detect_filename(audio_bytes)
+    with io.BytesIO(audio_bytes) as audio_file:
+        setattr(audio_file, "name", filename)
+        transcription = client.audio.transcriptions.create(model=model, file=audio_file)
+    return getattr(transcription, "text", "") or ""
+
+
+def text_to_speech(text: str, api_key: str, model: str = "gpt-4o-mini-tts", voice: str = "alloy", fmt: str = "mp3") -> bytes:
+    """Synthesize speech for `text` using the OpenAI audio/speech endpoint.
+
+    Returns raw audio bytes (e.g. MP3) or empty bytes on failure.
+    """
+    client = OpenAI(api_key=api_key)
+    try:
+        # The Python SDK surface for TTS can vary between releases. Try the
+        # high-level `audio.speech.create` call and read bytes from the result.
+        result = client.audio.speech.create(model=model, voice=voice, input=text, format=fmt)
+        # If result is raw bytes, return directly.
+        if isinstance(result, (bytes, bytearray)):
+            return bytes(result)
+        # Try common file-like interfaces.
+        if hasattr(result, "read"):
+            return result.read()
+        # Some SDKs return properties like `audio` or `content`.
+        for attr in ("audio", "content", "data"):
+            val = getattr(result, attr, None)
+            if isinstance(val, (bytes, bytearray)):
+                return bytes(val)
+            if isinstance(val, str):
+                try:
+                    return val.encode("utf-8")
+                except Exception:
+                    pass
+    except Exception:
+        # Fall through to return empty bytes on any error.
+        pass
+    return b""
 
 
 def tools_schema() -> list[dict[str, Any]]:

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+import base64
 import html
+import inspect
+import io
 
 import pandas as pd
 import plotly.express as px
@@ -28,6 +31,55 @@ def get_conn():
     conn = connect(default_db_path())
     init_db(conn)
     return conn
+
+
+def speak_text(text: str) -> None:
+    # Try server-side TTS first (higher quality, consistent audio format),
+    # but respect the user's preference in `st.session_state.use_server_tts`.
+    try:
+        if not st.session_state.get("use_server_tts", True):
+            raise RuntimeError("server-side TTS disabled by user")
+        api_key = agent.openai_api_key_from_streamlit(st)
+        if api_key:
+            audio_bytes = agent.text_to_speech(text, api_key)
+            if audio_bytes:
+                st.audio(io.BytesIO(audio_bytes), format="audio/mpeg")
+                return
+    except Exception:
+        pass
+
+    # Fallback to browser SpeechSynthesis via an iframe if server-side TTS
+    # isn't available or failed.
+    safe_text = html.escape(text).replace("\n", " ")
+    html_content = f"""
+    <html>
+      <body>
+        <script>
+          const msg = new SpeechSynthesisUtterance(\"{safe_text}\");
+          msg.lang = 'en-US';
+          window.speechSynthesis.cancel();
+          window.speechSynthesis.speak(msg);
+        </script>
+      </body>
+    </html>
+    """
+    data_url = "data:text/html;charset=utf-8," + html_content.replace("\n", "%0A").replace('"', '%22')
+    # Use top-level `st.iframe` when available (newer Streamlit); fall back to
+    # `streamlit.components.v1.iframe` for older Streamlit versions.
+    if hasattr(st, "iframe"):
+        st.iframe(
+            data_url,
+            height=1,
+            width="content",
+        )
+    else:
+        import streamlit.components.v1 as components
+
+        components.iframe(
+            data_url,
+            height=1,
+            width="content",
+        )
 
 
 def render_global_styles() -> None:
@@ -270,6 +322,107 @@ def render_global_styles() -> None:
             color: #e2e8f0 !important;
         }
 
+        .voice-listening {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.85rem 1rem;
+            border-radius: 1rem;
+            background: #e0f2fe;
+            color: #0f172a;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+
+        html[data-theme="dark"] .voice-listening {
+            background: rgba(59, 130, 246, 0.16) !important;
+            color: #e2e8f0;
+        }
+
+        .voice-listening .voice-pulse {
+            width: 0.9rem;
+            height: 0.9rem;
+            border-radius: 50%;
+            background: #2563eb;
+            animation: voice-pulse 1.4s infinite ease-in-out;
+        }
+
+        .voice-transcript-panel {
+            border-radius: 1rem;
+            padding: 1rem;
+            background: #eef2ff;
+            margin-bottom: 1rem;
+            border: 1px solid rgba(59, 130, 246, 0.16);
+        }
+
+        html[data-theme="dark"] .voice-transcript-panel {
+            background: rgba(59, 130, 246, 0.12) !important;
+            border: 1px solid rgba(59, 130, 246, 0.32) !important;
+        }
+
+        .voice-waveform {
+            display: flex;
+            gap: 0.4rem;
+            align-items: flex-end;
+            margin-bottom: 1rem;
+        }
+
+        .voice-waveform span {
+            display: inline-block;
+            width: 0.5rem;
+            height: 0.9rem;
+            border-radius: 0.35rem;
+            background: linear-gradient(180deg, #2563eb, #3b82f6);
+            animation: voice-wave 1.2s infinite ease-in-out;
+        }
+
+        .voice-waveform span:nth-child(2) {
+            animation-delay: 0.1s;
+            height: 1.4rem;
+        }
+
+        .voice-waveform span:nth-child(3) {
+            animation-delay: 0.2s;
+            height: 0.85rem;
+        }
+
+        .voice-waveform span:nth-child(4) {
+            animation-delay: 0.3s;
+            height: 1.2rem;
+        }
+
+        .voice-waveform span:nth-child(5) {
+            animation-delay: 0.4s;
+            height: 1rem;
+        }
+
+        .voice-transcript-card {
+            background: #f8fafc;
+            border: 1px solid rgba(15, 23, 42, 0.06);
+            border-radius: 1rem;
+            padding: 1rem 1.1rem;
+            margin-top: 0.8rem;
+            margin-bottom: 1rem;
+            font-size: 0.96rem;
+            color: #0f172a;
+        }
+
+        html[data-theme="dark"] .voice-transcript-card {
+            background: rgba(15, 23, 42, 0.76) !important;
+            border: 1px solid rgba(148, 163, 184, 0.2) !important;
+            color: #e2e8f0;
+        }
+
+        @keyframes voice-pulse {
+            0%, 100% { transform: scale(1); opacity: 0.65; }
+            50% { transform: scale(1.35); opacity: 1; }
+        }
+
+        @keyframes voice-wave {
+            0%, 100% { transform: scaleY(0.65); }
+            50% { transform: scaleY(1.5); }
+        }
+
         .stTabs [role="tablist"] button {
             border-radius: 999px !important;
         }
@@ -315,20 +468,21 @@ def main() -> None:
         st.markdown("**Signed in as**")
         st.markdown(f"<strong>{user['username']}</strong>", unsafe_allow_html=True)
         st.write("")
-        if st.button("Sign out", width="stretch"):
+        if st.button("Sign out"):
             st.session_state.clear()
             st.rerun()
 
-    tabs = ["Chat", "Calendar", "My Bookings", "Availability Heatmap"]
+    tabs = ["Chat", "Voice Agent", "Calendar", "My Bookings", "Availability Heatmap"]
     if user["is_admin"]:
         tabs.append("Admin")
     selected_tabs = st.tabs(tabs)
     render_chat(conn, user, selected_tabs[0])
-    render_calendar(conn, user, selected_tabs[1])
-    render_my_bookings(conn, user, selected_tabs[2])
-    render_heatmap(conn, selected_tabs[3])
+    render_voice_agent(conn, user, selected_tabs[1])
+    render_calendar(conn, user, selected_tabs[2])
+    render_my_bookings(conn, user, selected_tabs[3])
+    render_heatmap(conn, selected_tabs[4])
     if user["is_admin"]:
-        render_admin(conn, user, selected_tabs[4])
+        render_admin(conn, user, selected_tabs[5])
 
 
 def first_admin_form(conn) -> None:
@@ -404,6 +558,234 @@ def render_chat(conn, user: dict, tab) -> None:
             st.rerun()
 
 
+def render_voice_agent(conn, user: dict, tab) -> None:
+    with tab:
+        section_card(
+            "Voice Agent",
+            "Use your microphone to speak booking requests and questions. The voice assistant will transcribe and execute the same actions as chat.",
+        )
+        api_key = agent.openai_api_key_from_streamlit(st)
+        if not api_key:
+            st.warning("OPENAI_API_KEY is not configured. Voice input is disabled.")
+            return
+
+        if "voice_messages" not in st.session_state:
+            st.session_state.voice_messages = [
+                {"role": "assistant", "content": "Ask me to check availability, book a room, or manage your bookings."}
+            ]
+        if "voice_pending_tool" not in st.session_state:
+            st.session_state.voice_pending_tool = None
+        if "voice_active" not in st.session_state:
+            st.session_state.voice_active = False
+        if "voice_speaking" not in st.session_state:
+            st.session_state.voice_speaking = False
+        if "voice_last_audio_bytes" not in st.session_state:
+            st.session_state.voice_last_audio_bytes = None
+        if "voice_last_transcript" not in st.session_state:
+            st.session_state.voice_last_transcript = ""
+        st.markdown("### Voice conversation")
+        use_server_tts_default = st.session_state.get("use_server_tts", True)
+        use_server_tts_label = (
+            "Server-side TTS (higher quality, uses OpenAI)"
+            if use_server_tts_default
+            else "Browser TTS (fallback, local speech synthesis)"
+        )
+        st.checkbox(
+            use_server_tts_label,
+            value=use_server_tts_default,
+            key="use_server_tts",
+            help="Server-side TTS uses OpenAI audio generation and requires OPENAI_API_KEY.",
+        )
+
+        if not st.session_state.voice_active:
+            if st.button("Start voice conversation", key="voice_start"):
+                greeting_text = "Hello! I am your voice booking assistant. How can I help you today?"
+                st.session_state.voice_active = True
+                st.session_state.voice_speaking = False
+                st.session_state.voice_last_transcript = ""
+                st.session_state.voice_last_audio_bytes = None
+                st.session_state.voice_messages.append(
+                    {
+                        "role": "assistant",
+                        "content": greeting_text,
+                    }
+                )
+                try:
+                    speak_text(greeting_text)
+                except Exception:
+                    pass
+
+            st.info("Press Start to begin a live voice conversation in English.")
+            st.write("Once started, speak your request and the assistant will respond.")
+            for message in st.session_state.voice_messages:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+            return
+
+        stop_col, _ = st.columns([0.2, 0.8])
+        if stop_col.button("Stop conversation", key="voice_stop"):
+            st.session_state.voice_active = False
+            st.session_state.voice_speaking = False
+            st.success("Voice conversation ended. Start again to continue.")
+            st.rerun()
+
+        if st.session_state.voice_speaking:
+            st.markdown(
+                "<div class='voice-listening voice-speaking'><span class='voice-pulse'></span> Assistant speaking... the waveform shows playback.</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                "<div class='voice-listening'><span class='voice-pulse'></span> Listening... speak your request in English.</div>",
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            "<div class='voice-waveform'><span></span><span></span><span></span><span></span><span></span></div>",
+            unsafe_allow_html=True,
+        )
+        audio_bytes = None
+        st.info(
+            "Click the microphone, speak your request, and stop recording when finished. "
+            "A waveform appears while recording and the transcript panel shows status live."
+        )
+        try:
+            from audiorecorder import audiorecorder as st_audiorecorder
+        except Exception:
+            try:
+                from streamlit_audiorecorder import st_audiorecorder
+            except Exception:
+                st.warning(
+                    "Install `audiorecorder` or `streamlit-audiorecorder` to record directly in the browser, or upload an audio file below."
+                )
+                st_audiorecorder = None
+
+        if st_audiorecorder is not None:
+            try:
+                recorder_args = {}
+                sig = inspect.signature(st_audiorecorder)
+                if "show_visualizer" in sig.parameters:
+                    recorder_args = {
+                        "show_visualizer": True,
+                        "pause_prompt": "Pause recording",
+                        "stop_prompt": "Stop recording",
+                    }
+                    audio_recording = st_audiorecorder("Record your voice", key="voice_recorder", **recorder_args)
+                else:
+                    audio_recording = st_audiorecorder("Record your voice", key="voice_recorder", format="mp3")
+            except TypeError:
+                audio_recording = st_audiorecorder("Record your voice", key="voice_recorder")
+            except Exception:
+                audio_recording = None
+
+            if audio_recording is not None:
+                if hasattr(audio_recording, "export"):
+                    with io.BytesIO() as buffer:
+                        audio_recording.export(buffer, format="mp3")
+                        audio_bytes = buffer.getvalue()
+                elif isinstance(audio_recording, bytes):
+                    audio_bytes = audio_recording
+                elif isinstance(audio_recording, str):
+                    raw_audio = audio_recording
+                    if raw_audio.startswith("data:"):
+                        raw_audio = raw_audio.split(",", 1)[1]
+                    try:
+                        audio_bytes = base64.b64decode(raw_audio)
+                    except Exception:
+                        audio_bytes = raw_audio.encode("utf-8")
+
+        if audio_bytes is None:
+            uploaded_audio = st.file_uploader("Upload recorded voice file", type=["mp3", "wav", "m4a"])
+            if uploaded_audio is not None:
+                audio_bytes = uploaded_audio.read()
+
+        live_transcript_text = st.session_state.voice_last_transcript
+        if not live_transcript_text:
+            live_transcript_text = (
+                "Recording now... the waveform is live while you speak. "
+                "The transcript will update after you stop speaking."
+            )
+        st.markdown(
+            "<div class='voice-transcript-panel'><strong>Live transcript</strong><div class='voice-transcript-card'>"
+            + html.escape(live_transcript_text)
+            + "</div></div>",
+            unsafe_allow_html=True,
+        )
+
+        if audio_bytes is not None and audio_bytes != st.session_state.voice_last_audio_bytes:
+            st.session_state.voice_last_audio_bytes = audio_bytes
+            st.audio(audio_bytes)
+            st.session_state.voice_last_transcript = "Processing audio... transcribing now."
+            with st.spinner("Transcribing and processing your request..."):
+                try:
+                    transcript = agent.transcribe_audio(audio_bytes, api_key)
+                except Exception as exc:
+                    st.error(f"Voice transcription failed: {exc}")
+                    transcript = ""
+
+                if transcript:
+                    st.session_state.voice_last_transcript = transcript
+                    st.markdown("#### You spoke")
+                    st.markdown(
+                        f"<div class='voice-transcript-card'>{html.escape(transcript)}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    if (
+                        st.session_state.get("voice_pending_tool")
+                        and transcript.strip().lower() in {"confirm", "yes", "proceed"}
+                    ):
+                        pending = st.session_state.pop("voice_pending_tool")
+                        try:
+                            result = agent.execute_tool(conn, user, pending["name"], pending["arguments"])
+                            reply = f"Confirmed. Result: `{result}`"
+                        except Exception as exc:
+                            reply = f"I could not complete that action: {exc}"
+                    else:
+                        st.session_state.voice_messages.append({"role": "user", "content": transcript})
+                        try:
+                            result = agent.chat(conn, user, st.session_state.voice_messages, api_key)
+                            reply = result.message
+                            if result.pending_tool:
+                                st.session_state.voice_pending_tool = result.pending_tool
+                        except Exception as exc:
+                            reply = f"Voice assistant failed: {exc}"
+                    st.session_state.voice_messages.append({"role": "assistant", "content": reply})
+                    st.session_state.voice_speaking = True
+                    try:
+                        speak_text(reply)
+                    except Exception:
+                        pass
+                    st.rerun()
+
+        for message in st.session_state.voice_messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        if st.session_state.voice_pending_tool:
+            pending = st.session_state.voice_pending_tool
+            st.warning(
+                f"Confirm the following action before it runs: {pending['name']} with {pending['arguments']}"
+            )
+            confirm_col, cancel_col = st.columns(2)
+            if confirm_col.button("Confirm voice action", key="voice_confirm"):
+                try:
+                    result = agent.execute_tool(conn, user, pending["name"], pending["arguments"])
+                    confirmation = f"Confirmed. Result: `{result}`"
+                    st.session_state.voice_messages.append(
+                        {"role": "assistant", "content": confirmation}
+                    )
+                    try:
+                        speak_text(confirmation)
+                    except Exception:
+                        pass
+                    st.session_state.voice_pending_tool = None
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+            if cancel_col.button("Cancel voice action", key="voice_cancel"):
+                st.session_state.voice_pending_tool = None
+                st.success("Voice action cancelled.")
+
+
 def render_sample_prompts() -> None:
     examples = {
         "Check availability": [
@@ -452,7 +834,7 @@ def render_sample_prompts() -> None:
                     if st.button("Copy", key=f"copy_{heading}_{i}"):
                         st.session_state["chat_input"] = p
                         try:
-                            st.experimental_rerun()
+                            st.rerun()
                         except Exception:
                             st.success("Prompt copied to chat input. Click the chat box to edit and submit.")
                 st.markdown("<div style='height:0.55rem'></div>", unsafe_allow_html=True)
@@ -684,11 +1066,11 @@ def render_heatmap(conn, tab) -> None:
                 color_continuous_scale="Blues",
                 labels={"color": "Booked hours"},
             )
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig)
         util = analytics.utilization_dataframe(conn, start, end)
         if not util.empty:
             st.markdown("#### Utilization")
-            st.dataframe(util, width="stretch", hide_index=True)
+            st.dataframe(util, hide_index=True)
 
 
 def render_admin(conn, user: dict, tab) -> None:
@@ -706,7 +1088,7 @@ def render_admin(conn, user: dict, tab) -> None:
             admin_holidays(conn, user)
         with audit_tab:
             rows = conn.execute("SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 200").fetchall()
-            st.dataframe(pd.DataFrame([dict(row) for row in rows]), width="stretch", hide_index=True)
+            st.dataframe(pd.DataFrame([dict(row) for row in rows]), hide_index=True)
 
 
 def admin_rooms(conn, user: dict) -> None:
@@ -818,14 +1200,14 @@ def admin_reports(conn) -> None:
     if user_summary.empty:
         st.info("No bookings found in this period.")
     else:
-        st.dataframe(user_summary, width="stretch")
+        st.dataframe(user_summary)
 
     st.markdown("##### Room utilization and booking volumes")
-    st.dataframe(room_summary, width="stretch")
+    st.dataframe(room_summary)
 
     st.markdown("##### Bookings by weekday")
     if not weekday_summary.empty:
-        st.dataframe(weekday_summary, width="stretch")
+        st.dataframe(weekday_summary)
 
 
 def admin_holidays(conn, user: dict) -> None:
