@@ -1,7 +1,7 @@
 streamlit>=1.36
 openai>=1.40
 streamlit-calendar>=1.2
-streamlit-audiorecorder>=0.1.0
+streamlit-audiorecorder
 pandas>=2.0
 plotly>=5.20
 pytest>=8.0
