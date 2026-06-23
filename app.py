@@ -464,7 +464,7 @@ def main() -> None:
         st.markdown("**Signed in as**")
         st.markdown(f"<strong>{user['username']}</strong>", unsafe_allow_html=True)
         st.write("")
-        if st.button("Sign out", use_container_width=True):
+        if st.button("Sign out", width="stretch"):
             st.session_state.clear()
             st.rerun()
 
@@ -881,7 +881,7 @@ def render_calendar(conn, user: dict, tab) -> None:
             calendar(events=events, options=options, key=f"calendar_{view}_{start}_{end}")
         else:
             st.warning("Install streamlit-calendar for interactive calendar views.")
-            st.dataframe(pd.DataFrame(events), use_container_width=True)
+            st.dataframe(pd.DataFrame(events), width="stretch")
         st.caption("Date-specific holidays are shown in red. Weekly closed days are hidden and cannot be booked.")
 
         st.divider()
@@ -1054,11 +1054,11 @@ def render_heatmap(conn, tab) -> None:
                 color_continuous_scale="Blues",
                 labels={"color": "Booked hours"},
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         util = analytics.utilization_dataframe(conn, start, end)
         if not util.empty:
             st.markdown("#### Utilization")
-            st.dataframe(util, use_container_width=True, hide_index=True)
+            st.dataframe(util, width="stretch", hide_index=True)
 
 
 def render_admin(conn, user: dict, tab) -> None:
@@ -1075,7 +1075,7 @@ def render_admin(conn, user: dict, tab) -> None:
             admin_holidays(conn, user)
         with audit_tab:
             rows = conn.execute("SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 200").fetchall()
-            st.dataframe(pd.DataFrame([dict(row) for row in rows]), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame([dict(row) for row in rows]), width="stretch", hide_index=True)
 
 
 def admin_rooms(conn, user: dict) -> None:
@@ -1187,14 +1187,14 @@ def admin_reports(conn) -> None:
     if user_summary.empty:
         st.info("No bookings found in this period.")
     else:
-        st.dataframe(user_summary, use_container_width=True)
+        st.dataframe(user_summary, width="stretch")
 
     st.markdown("##### Room utilization and booking volumes")
-    st.dataframe(room_summary, use_container_width=True)
+    st.dataframe(room_summary, width="stretch")
 
     st.markdown("##### Bookings by weekday")
     if not weekday_summary.empty:
-        st.dataframe(weekday_summary, use_container_width=True)
+        st.dataframe(weekday_summary, width="stretch")
 
 
 def admin_holidays(conn, user: dict) -> None:
